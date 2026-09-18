@@ -14,3 +14,4 @@ artifacts/
 *.pth
 *.ckpt
 .DS_Store
+Dataset/mimic_cxr_aug_train.csv
