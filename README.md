@@ -83,51 +83,57 @@ production without an evaluation and calibration protocol.
 
 ## Fine-tune in Colab or Kaggle
 
-The repository includes a transfer-learning script in
-[`scripts/train_xray.py`](./scripts/train_xray.py). Upload or clone this
-repository into Colab/Kaggle, enable a GPU, and install the package:
+The repository includes a DenseNet-121 transfer-learning script in
+[`scripts/train_densenet_kaggle.py`](./scripts/train_densenet_kaggle.py).
+It uses ImageNet initialization, masked binary cross-entropy for weak labels,
+subject-level split validation, mixed precision on CUDA, cosine learning-rate
+decay, early stopping, and AUROC/AUPRC/F1 reporting. Upload or clone this
+repository into Kaggle, enable a GPU, and install the training dependencies:
 
 ```bash
-pip install -e .
+pip install -e ".[training]"
 ```
 
-Create a manifest CSV. The first column must be `image_path`; the remaining
-columns must be the TorchXRayVision pathology names, in the same order as the
-pretrained model. Use `0`, `1`, or an empty value for an unknown label:
+The default Kaggle paths target the MIMIC-CXR weak-label and image datasets
+used by this project. Override them when using different Kaggle dataset slugs:
 
 ```csv
-image_path,Atelectasis,Consolidation,Infiltration,...
-images/a.png,0,1,,
-images/b.png,1,0,1
+python scripts/train_densenet_kaggle.py \
+  --weak-root /kaggle/input/<weak-label-dataset> \
+  --image-root /kaggle/input/<image-dataset>/official_data_iccv_final
 ```
 
-Train and export the best validation checkpoint:
+The weak-label directory must contain `train_image_weak_labels_20.csv`,
+`validate_image_weak_labels_20.csv`, and `concept_catalog_20.csv`. Each split
+must include `image`, `view`, and `subject_id` columns. The concept catalog
+defines the 20 concepts; each corresponding target column is named
+`<concept>__target` and may contain `0`, `1`, or an empty value/`NaN` for an
+unknown label. Only AP and PA images are used.
+
+Useful overrides for a smaller Kaggle run:
 
 ```bash
-python scripts/train_xray.py \
-  --csv /content/manifest.csv \
-  --image-root /content/dataset \
-  --output artifacts/xray-finetuned.pt \
-  --epochs 5
+python scripts/train_densenet_kaggle.py \
+  --weak-root /kaggle/input/<weak-label-dataset> \
+  --image-root /kaggle/input/<image-dataset>/official_data_iccv_final \
+  --output-dir /kaggle/working/densenet121_20concepts \
+  --batch-size 32 \
+  --epochs 5 \
+  --patience 2
 ```
 
-Evaluate the exported checkpoint on a separate test manifest:
+The command writes the best checkpoint, training history, validation
+probabilities, and per-concept metrics to `--output-dir`:
 
 ```bash
-python scripts/evaluate_xray.py \
-  --checkpoint artifacts/xray-finetuned.pt \
-  --csv /content/test.csv \
-  --image-root /content/dataset
+best_densenet121_20concepts.pt
+training_history.csv
+concept_probabilities_validate.csv
+per_concept_metrics.csv
 ```
 
-Download `artifacts/xray-finetuned.pt` to the Mac project (do not commit
-model weights), then set:
-
-```bash
-export XRAY_CHECKPOINT=/absolute/path/to/xray-finetuned.pt
-uvicorn multimodal_diagnosis.main:app --reload
-```
-
-The API loads the exported checkpoint on the first request. If
-`XRAY_CHECKPOINT` is empty, it continues to use the original pretrained
-checkpoint.
+Download `best_densenet121_20concepts.pt` to the Mac project (do not commit
+model weights). The existing API continues to use the TorchXRayVision
+checkpoint configured by `XRAY_MODEL_WEIGHTS`; the Kaggle checkpoint is a
+separate 20-concept research artifact and requires an explicit inference
+adapter before it can be served by the API.
